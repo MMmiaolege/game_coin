@@ -5,9 +5,12 @@ import pydirectinput
 from adafruit_pn532.uart import PN532_UART
 from dotenv import load_dotenv
 import os
+import threading
 
+# 禁用额外安全措施
+pydirectinput.FAILSAFE = False
 # === 从 config.env 加载配置 ===
-load_dotenv("config.env")
+load_dotenv("./config.env")
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
@@ -20,6 +23,8 @@ NFC_PORT = os.getenv("NFC_PORT", "COM4")
 SCREEN_PORT = os.getenv("SCREEN_PORT", "COM5")
 SCREEN_BAUD = int(os.getenv("SCREEN_BAUD", "9600"))
 COIN_KEY = os.getenv("COIN_KEY", "9")
+# 新增 1P 键配置
+PLAYER1_KEY = os.getenv("PLAYER1_KEY", "i")
 
 # === 初始化 NFC ===
 try:
@@ -35,17 +40,67 @@ except Exception as e:
 try:
     screen = serial.Serial(SCREEN_PORT, SCREEN_BAUD, timeout=1)
     time.sleep(2)
+    print("✅ 串口屏初始化成功")
 except Exception as e:
     print(f"⚠️ 屏幕初始化失败: {e}")
-    def send_command(cmd): pass
-else:
-    def send_command(cmd_str):
+    screen = None
+
+def send_command(cmd_str):
+    """发送指令到串口屏"""
+    if screen and screen.is_open:
         try:
             cmd_bytes = cmd_str.encode('utf-8')
             screen.write(cmd_bytes + b'\xFF\xFF\xFF')
             time.sleep(0.05)
         except Exception as ex:
             print(f"发送指令出错: {ex}")
+
+# === 串口屏触摸监听 ===
+def listen_screen_touch():
+    """监听串口屏的触摸事件"""
+    buffer = bytearray()
+    
+    while True:
+        if screen and screen.is_open:
+            try:
+                # 读取串口数据
+                if screen.in_waiting > 0:
+                    data = screen.read(screen.in_waiting)
+                    buffer.extend(data)
+                    
+                    # 将字节数据转换为字符串进行匹配
+                    try:
+                        text_data = buffer.decode('utf-8', errors='ignore')
+                    except:
+                        text_data = ""
+                    
+                    # 调试信息（可选）
+                    if len(buffer) > 0:
+                        print(f"串口数据: {buffer} -> 文本: '{text_data}'")
+                    
+                    # 检查是否包含 "1P" 文本
+                    if "1P" in text_data:
+                        print("🎮 检测到 1P 键触摸，模拟按键")
+                        pydirectinput.press(PLAYER1_KEY)
+                        # 清空缓冲区中已处理的数据
+                        buffer.clear()
+                    
+                    # 防止缓冲区过大
+                    if len(buffer) > 100:
+                        buffer.clear()
+                        
+            except Exception as e:
+                print(f"串口读取错误: {e}")
+                buffer.clear()
+                time.sleep(0.1)
+        time.sleep(0.01)
+
+# 启动监听线程
+def start_screen_listener():
+    if screen:
+        listener_thread = threading.Thread(target=listen_screen_touch, daemon=True)
+        listener_thread.start()
+        print("✅ 串口屏触摸监听已启动")
 
 # === 初始化屏幕 ===
 send_command('page 0')
@@ -71,6 +126,9 @@ def show_message(msg, page=2):
     time.sleep(2)
     send_command('page 0')
     send_command('t0.txt="请刷卡"')
+
+# === 启动触摸监听 ===
+start_screen_listener()
 
 # === 主循环 ===
 try:
@@ -199,6 +257,7 @@ except KeyboardInterrupt:
 finally:
     try:
         nfc_uart.close()
-        screen.close()
+        if screen:
+            screen.close()
     except:
         pass
