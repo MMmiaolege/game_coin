@@ -105,6 +105,8 @@ def start_screen_listener():
 # === 初始化屏幕 ===
 send_command('page 0')
 send_command('t0.txt="请刷卡"')
+# === 声明版本 ===
+print("游戏币系统 版本 1.1")
 print("🎮 游戏币系统启动成功！")
 
 # === 全局状态 ===
@@ -260,4 +262,5 @@ finally:
         if screen:
             screen.close()
     except:
+
         pass
